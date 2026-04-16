@@ -1,0 +1,46 @@
+# Secrets and local env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+venv*/
+venvr/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Runtime logs
+*.log
+
+# Local pipeline artifacts
+data/pdfs/
+results/
+vectorstore/
+
+# Optional: local experiment caches
+.cache/
+.huggingface/
