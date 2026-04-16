@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 import pandas as pd
-from openai import AsyncOpenAI
+from openai import OpenAI
 
 from .config import PipelineConfig
 from .nebius_client import NebiusChatClient
@@ -93,9 +93,23 @@ def compute_faithfulness_first_20(
         subset["faithfulness_error"] = f"Missing ragas dependency: {exc}"
         return subset, None
 
-    ragas_llm = llm_factory(
-        AsyncOpenAI(base_url=config.api_base_url, api_key=config.api_key)
-    )
+    ragas_model = config.ragas_model or config.judge_model or config.generation_model
+    if not ragas_model:
+        subset["faithfulness_score"] = None
+        subset["faithfulness_error"] = (
+            "Missing RAGAS_MODEL (or JUDGE_MODEL/GENERATION_MODEL fallback) for ragas llm_factory."
+        )
+        return subset, None
+
+    try:
+        ragas_llm = llm_factory(
+            ragas_model,
+            client=OpenAI(base_url=config.api_base_url, api_key=config.api_key),
+        )
+    except Exception as exc:  # pragma: no cover
+        subset["faithfulness_score"] = None
+        subset["faithfulness_error"] = f"Failed to initialize ragas llm: {exc}"
+        return subset, None
 
     scores: list[float | None] = []
     errors: list[str | None] = []

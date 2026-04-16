@@ -153,7 +153,8 @@ def build_or_load_vectorstore(
         raise ValueError("No chunks available to index. Cannot build vectorstore.")
 
     print(f"Building new vectorstore from {len(chunks)} chunks ...")
-    batch_size = 64
+    batch_size = 500
+    print(f"Indexing in batches of {batch_size} chunks")
 
     first_batch = chunks[:batch_size]
     vectorstore = FAISS.from_documents(first_batch, embeddings)
