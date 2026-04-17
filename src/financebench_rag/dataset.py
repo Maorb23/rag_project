@@ -1,6 +1,13 @@
+"""
+
+FinanceBench dataset utilities. We first load the dataset into a DataFrame, 
+then apply various transformations to normalize evidence page numbers and 
+repair document links. The resulting DataFrame is used for RAG retrieval and 
+evaluation.
+"""
+
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +19,9 @@ VALID_QUESTION_TYPES = {"domain-relevant", "novel-generated"}
 
 
 def load_financebench_dataframe(dataset_id: str, split: str = "train") -> pd.DataFrame:
+    """
+    Load the FinanceBench dataset into a pandas DataFrame.
+    """
     dataset = load_dataset(dataset_id, split=split)
     df = dataset.to_pandas()
     if "financebench_id" in df.columns:
@@ -20,67 +30,63 @@ def load_financebench_dataframe(dataset_id: str, split: str = "train") -> pd.Dat
 
 
 def filter_financebench_questions(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Filter the FinanceBench and retain only rows with valid question types. Sort by financebench_id if present for consistent ordering.
+    """
     if "question_type" not in df.columns:
         raise ValueError("Expected question_type column in FinanceBench dataset.")
     filtered = df[df["question_type"].isin(VALID_QUESTION_TYPES)].copy()
     if "financebench_id" in filtered.columns:
-        filtered = filtered.sort_values("financebench_id", kind="stable").reset_index(drop=True)
+        filtered = filtered.sort_values("financebench_id", kind="stable").reset_index(drop=True) # Sort by financebench_id if present for consistent ordering.
     return filtered
 
 
-def _parse_json_like(value: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return value
-    if isinstance(value, str):
-        value = value.strip()
-        if not value:
-            return None
-        try:
-            return json.loads(value)
-        except Exception:
-            return value
-    return value
-
-
 def _extract_evidence_pages_recursive(node: Any) -> list[int]:
+    """Extract evidence page numbers from FinanceBench evidence payload.
+
+    Expected input is a list of evidence dicts, but this function also supports
+    numpy object arrays by converting them via .tolist().
+    """
+    if node is None: # Handle None values gracefully to avoid errors during page number extraction.
+        return []
+
+    if hasattr(node, "tolist"): # Handle numpy object arrays by converting them to lists for easier processing.
+        node = node.tolist()
+
+    if isinstance(node, dict): # If the node is a dict, check if it has the 'evidence_page_num' key and extract it. Otherwise, continue searching recursively in its values.
+        node = [node] # Wrap dict in a list to process it uniformly with lists of dicts.
+
+    if not isinstance(node, list): # If the node is not a list at this point, it means it's an unexpected type (e.g., a string or number), so we return an empty list since we can't extract page numbers from it.
+        return []
+
     pages: list[int] = []
 
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key == "evidence_page_num":
-                if isinstance(value, list):
-                    for item in value:
-                        try:
-                            pages.append(int(item))
-                        except Exception:
-                            continue
-                else:
-                    try:
-                        pages.append(int(value))
-                    except Exception:
-                        pass
-            else:
-                pages.extend(_extract_evidence_pages_recursive(value))
+    for item in node:
+        if not isinstance(item, dict): # If the item is not a dict, we skip it since we expect evidence items to be dicts containing metadata.
+            continue
 
-    elif isinstance(node, list):
-        for item in node:
-            pages.extend(_extract_evidence_pages_recursive(item))
+        value = item.get("evidence_page_num")
+        if value is None:
+            continue
+
+        values = value if isinstance(value, list) else [value]
+        for candidate in values:
+            pages.append(int(candidate))
+
 
     return pages
 
 
 def normalize_evidence_pages(df: pd.DataFrame, evidence_col: str = "evidence") -> pd.DataFrame:
+    df = df.copy()
     if evidence_col not in df.columns:
-        df = df.copy()
         df["evidence_page_nums"] = [[] for _ in range(len(df))]
         return df
 
-    df = df.copy()
     normalized_pages: list[list[int]] = []
-
     for raw in df[evidence_col].tolist():
-        parsed = _parse_json_like(raw)
-        pages = sorted(set(_extract_evidence_pages_recursive(parsed)))
+        pages = _extract_evidence_pages_recursive(raw)
+        pages = sorted(set(p for p in pages if isinstance(p, int) and p >= 0))
         normalized_pages.append(pages)
 
     df["evidence_page_nums"] = normalized_pages

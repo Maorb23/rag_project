@@ -1,3 +1,7 @@
+"""
+Build a side-by-side comparison table of questions and their answers from different models.
+"""
+
 from __future__ import annotations
 
 import pandas as pd
