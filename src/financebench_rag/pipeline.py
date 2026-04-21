@@ -14,7 +14,7 @@ from .evaluation import (
     compute_faithfulness_first_20,
     compute_page_hit_rate,
 )
-from .io_utils import save_dataframe_csv, save_dataframe_json, save_json
+from .utils.io_utils import save_dataframe_csv, save_dataframe_json, save_json
 from .naive_generation import run_naive_generation, sample_stage2_questions
 from .rag_pipeline import RAGPipeline
 from .retrieval_checks import run_retrieval_sanity_checks

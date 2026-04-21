@@ -4,14 +4,8 @@ from typing import Any
 
 import pandas as pd
 from langchain_community.vectorstores import FAISS
+from .utils.utils_eval import _contains_any_evidence_text
 
-
-def _contains_any_evidence_text(chunk_text: str, evidence: Any) -> bool:
-    if not isinstance(evidence, str) or not evidence.strip():
-        return False
-    small_chunk = chunk_text.lower()
-    token = evidence.strip().lower()[:80]
-    return token in small_chunk if token else False
 
 
 def run_retrieval_sanity_checks(

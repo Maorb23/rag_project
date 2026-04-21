@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from typing import Any
 
 import pandas as pd
@@ -8,31 +10,90 @@ from openai import OpenAI
 
 from .config import PipelineConfig
 from .nebius_client import NebiusChatClient
+from .utils.utils_eval import _judge_prompt, _parse_judge_response
 
 
-def _judge_prompt(question: str, predicted: str, ground_truth: str) -> str:
-    return (
-        "You are an evaluator. Compare model answer to ground truth.\n"
-        "Return JSON with keys: verdict (correct|incorrect), justification (one sentence).\n\n"
-        f"Question: {question}\n\n"
-        f"Model answer: {predicted}\n\n"
-        f"Ground truth: {ground_truth}"
-    )
+def _normalize_ragas_score(value: Any) -> float:
+    if isinstance(value, dict) and "score" in value:
+        return float(value["score"])
+    if hasattr(value, "score"):
+        return float(getattr(value, "score"))
+    return float(value)
 
 
-def _parse_judge_response(text: str) -> tuple[str, str]:
-    text = (text or "").strip()
+def _run_coro_in_thread(coro: Any) -> Any:
+    container: dict[str, Any] = {}
+
+    def _runner() -> None:
+        try:
+            container["value"] = asyncio.run(coro)
+        except Exception as exc:  # pragma: no cover
+            container["error"] = exc
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+
+    if "error" in container:
+        raise container["error"]
+    return container.get("value")
+
+
+def _build_retrieved_contexts(item: dict[str, Any]) -> list[str]:
+    chunks = item.get("retrieved_chunks", [])
+    contexts: list[str] = []
+
+    if isinstance(chunks, list):
+        for chunk in chunks:
+            if isinstance(chunk, dict):
+                content = chunk.get("content")
+                if content:
+                    contexts.append(str(content))
+                else:
+                    contexts.append(
+                        f"doc_name: {chunk.get('doc_name')}\npage_number: {chunk.get('page_number')}"
+                    )
+            else:
+                contexts.append(str(chunk))
+
+    return contexts or [""]
+
+
+def _score_faithfulness(metric: Any, sample: dict[str, Any], ragas_llm: Any) -> float:
     try:
-        payload = json.loads(text)
-        verdict = str(payload.get("verdict", "incorrect")).strip().lower()
-        if verdict not in {"correct", "incorrect"}:
-            verdict = "incorrect"
-        justification = str(payload.get("justification", "No justification provided.")).strip()
-        return verdict, justification
+        from ragas.dataset_schema import SingleTurnSample
+
+        sample_obj: Any = SingleTurnSample(**sample)
     except Exception:
-        lowered = text.lower()
-        verdict = "correct" if "correct" in lowered and "incorrect" not in lowered else "incorrect"
-        return verdict, text[:300] if text else "Could not parse structured output."
+        sample_obj = sample
+
+    # Newer ragas API (sync)
+    if hasattr(metric, "single_turn_score"):
+        try:
+            value = metric.single_turn_score(sample_obj, llm=ragas_llm)
+        except TypeError:
+            if hasattr(metric, "llm"):
+                metric.llm = ragas_llm
+            value = metric.single_turn_score(sample_obj)
+        return _normalize_ragas_score(value)
+
+    # Newer ragas API (async)
+    if hasattr(metric, "single_turn_ascore"):
+        try:
+            coro = metric.single_turn_ascore(sample_obj, llm=ragas_llm)
+        except TypeError:
+            if hasattr(metric, "llm"):
+                metric.llm = ragas_llm
+            coro = metric.single_turn_ascore(sample_obj)
+        value = _run_coro_in_thread(coro)
+        return _normalize_ragas_score(value)
+
+    # Older ragas API
+    if hasattr(metric, "score"):
+        value = metric.score(sample, llm=ragas_llm)
+        return _normalize_ragas_score(value)
+
+    raise AttributeError("Unsupported ragas faithfulness API: no scoring method found.")
 
 
 def compute_correctness_judgements(
@@ -118,16 +179,10 @@ def compute_faithfulness_first_20(
         sample = {
             "user_input": str(item.get("question", "")),
             "response": str(item.get("rag_answer", "")),
-            "retrieved_contexts": [
-                json.dumps(item.get("retrieved_chunks", []), ensure_ascii=False)
-            ],
+            "retrieved_contexts": _build_retrieved_contexts(item),
         }
         try:
-            value = faithfulness.score(sample, llm=ragas_llm)
-            if isinstance(value, dict) and "score" in value:
-                score = float(value["score"])
-            else:
-                score = float(value)
+            score = _score_faithfulness(faithfulness, sample, ragas_llm)
             scores.append(score)
             errors.append(None)
         except Exception as exc:  # pragma: no cover

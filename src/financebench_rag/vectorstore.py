@@ -10,17 +10,13 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
-
+from .utils.utils_dataset import _normalize_pdf_name
 from .config import PipelineConfig
 
 RAW_PDF_BASE = "https://raw.githubusercontent.com/patronus-ai/financebench/main/pdfs"
 
 
-def _normalize_pdf_name(doc_name: str) -> str:
-    name = str(doc_name).strip()
-    if name.lower().endswith(".pdf"):
-        return name
-    return f"{name}.pdf"
+
 
 
 def download_required_pdfs(doc_names: Iterable[str], pdf_dir: Path, timeout: int = 60) -> list[Path]:

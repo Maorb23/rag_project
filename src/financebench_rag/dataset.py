@@ -13,6 +13,12 @@ from typing import Any
 
 import pandas as pd
 from datasets import load_dataset
+from .utils.utils_dataset import (
+    _extract_evidence_pages_recursive, 
+    _is_dead_doc_link, 
+    _to_pdf_filename
+)
+
 
 RAW_PDF_BASE = "https://raw.githubusercontent.com/patronus-ai/financebench/main/pdfs"
 VALID_QUESTION_TYPES = {"domain-relevant", "novel-generated"}
@@ -41,43 +47,10 @@ def filter_financebench_questions(df: pd.DataFrame) -> pd.DataFrame:
     return filtered
 
 
-def _extract_evidence_pages_recursive(node: Any) -> list[int]:
-    """Extract evidence page numbers from FinanceBench evidence payload.
-
-    Expected input is a list of evidence dicts, but this function also supports
-    numpy object arrays by converting them via .tolist().
-    """
-    if node is None: # Handle None values gracefully to avoid errors during page number extraction.
-        return []
-
-    if hasattr(node, "tolist"): # Handle numpy object arrays by converting them to lists for easier processing.
-        node = node.tolist()
-
-    if isinstance(node, dict): # If the node is a dict, check if it has the 'evidence_page_num' key and extract it. Otherwise, continue searching recursively in its values.
-        node = [node] # Wrap dict in a list to process it uniformly with lists of dicts.
-
-    if not isinstance(node, list): # If the node is not a list at this point, it means it's an unexpected type (e.g., a string or number), so we return an empty list since we can't extract page numbers from it.
-        return []
-
-    pages: list[int] = []
-
-    for item in node:
-        if not isinstance(item, dict): # If the item is not a dict, we skip it since we expect evidence items to be dicts containing metadata.
-            continue
-
-        value = item.get("evidence_page_num")
-        if value is None:
-            continue
-
-        values = value if isinstance(value, list) else [value]
-        for candidate in values:
-            pages.append(int(candidate))
-
-
-    return pages
-
-
 def normalize_evidence_pages(df: pd.DataFrame, evidence_col: str = "evidence") -> pd.DataFrame:
+    """
+    Normalize the evidence page numbers in the FinanceBench dataset. This function extracts page numbers from the specified evidence column, which may contain nested structures, and creates a new column 'evidence_page_nums' with a list of page numbers for each question.
+    """
     df = df.copy()
     if evidence_col not in df.columns:
         df["evidence_page_nums"] = [[] for _ in range(len(df))]
@@ -93,21 +66,12 @@ def normalize_evidence_pages(df: pd.DataFrame, evidence_col: str = "evidence") -
     return df
 
 
-def _is_dead_doc_link(link: Any) -> bool:
-    if not isinstance(link, str) or not link.strip():
-        return True
-    normalized = link.strip().lower()
-    return not normalized.startswith("http") or "404" in normalized
-
-
-def _to_pdf_filename(doc_name: str) -> str:
-    doc_name = str(doc_name).strip()
-    if doc_name.lower().endswith(".pdf"):
-        return doc_name
-    return f"{doc_name}.pdf"
-
-
 def repair_doc_links(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Repair document links in the FinanceBench dataset. For any row where the 'doc_link' is 
+    missing or appears to be a dead link, we generate a repaired link based on the 
+    'doc_name' and a known URL pattern. We also create a mapping DataFrame that shows the original doc_name, the generated PDF filename, and the repaired link for reference.
+    """
     if "doc_name" not in df.columns:
         raise ValueError("Expected doc_name column in FinanceBench dataset.")
 
