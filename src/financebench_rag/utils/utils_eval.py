@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from collections.abc import Iterable
+import numpy as np
 
 import pandas as pd
 from openai import OpenAI
@@ -38,8 +40,44 @@ def _parse_judge_response(text: str) -> tuple[str, str]:
     
 
 def _contains_any_evidence_text(chunk_text: str, evidence: Any) -> bool:
-    if not isinstance(evidence, str) or not evidence.strip():
+    """Return True if any evidence text appears (approximately) in the chunk.
+
+    Accepts evidence as a string, list/iterable of strings, numpy object array, or pandas Series.
+    Performs a case-insensitive substring check using the first 80 characters of each evidence item.
+    """
+    if not chunk_text:
         return False
-    small_chunk = chunk_text.lower()
-    token = evidence.strip().lower()[:80]
-    return token in small_chunk if token else False
+
+    small_chunk = str(chunk_text).lower()
+
+    # Normalize evidence containers (list, tuple, numpy arrays, pandas series)
+    if evidence is None:
+        return False
+
+    # If it's a numpy array or pandas Series, convert to list
+    try:
+        if isinstance(evidence, np.ndarray):
+            evidence_iter: Iterable = evidence.tolist()
+        else:
+            evidence_iter = evidence
+    except Exception:
+        evidence_iter = evidence
+
+    # Single string
+    if isinstance(evidence_iter, str):
+        token = evidence_iter.strip().lower()[:80]
+        return bool(token and token in small_chunk)
+
+    # Iterable of potential evidence strings
+    if isinstance(evidence_iter, Iterable):
+        for item in evidence_iter:
+            if not isinstance(item, str):
+                continue
+            token = item.strip().lower()[:80]
+            if token and token in small_chunk:
+                return True
+        return False
+
+    # Fallback: convert to string
+    token = str(evidence).strip().lower()[:80]
+    return bool(token and token in small_chunk)

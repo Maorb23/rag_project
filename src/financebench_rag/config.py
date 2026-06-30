@@ -34,6 +34,10 @@ class PipelineConfig:
     pdf_dir: Path = Path("data/pdfs")
     vectorstore_dir: Path = Path("vectorstore")
     results_dir: Path = Path("results")
+    # Optional reranker configuration: if True, retrieve `rerank_top_k` then rerank to `rerank_final_k`
+    rerank_enabled: bool = False
+    rerank_top_k: int = 20
+    rerank_final_k: int = 4
 
     def validate_required_secrets(self) -> None:
         if not self.api_base_url or not self.api_key:
@@ -75,4 +79,7 @@ def load_config(env_file: str | None = ".env") -> PipelineConfig:
         pdf_dir=Path(os.getenv("PDF_DIR", "data/pdfs")),
         vectorstore_dir=Path(os.getenv("VECTORSTORE_DIR", "vectorstore")),
         results_dir=Path(os.getenv("RESULTS_DIR", "results")),
+        rerank_enabled=(os.getenv("RERANK_ENABLED", "false").lower() in ("1", "true", "yes")),
+        rerank_top_k=int(os.getenv("RERANK_TOP_K", "20")),
+        rerank_final_k=int(os.getenv("RERANK_FINAL_K", "4")),
     )
